@@ -5,7 +5,7 @@ on:
 
 env:
   PLATFORMS: linux/amd64,linux/arm64
-
+  REGISTRY_TYPE: ${{ vars.REGISTRY_TYPE }}
 permissions:
   contents: write
 
