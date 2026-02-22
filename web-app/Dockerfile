@@ -1,21 +1,12 @@
-# go-service/Dockerfile
+# python-service/Dockerfile
 
-# ---- Build Stage ----
-FROM golang:1.22-alpine AS builder
-
-WORKDIR /app
-
-# Create a simple Go program
-RUN echo 'package main
-
-RUN go build -o app main.go
-
-# ---- Runtime Stage ----
-FROM alpine:3.19
+FROM python:3.11-alpine
 
 WORKDIR /app
-COPY --from=builder /app/app .
+
+# Create a simple Python file (single line, no quoting issues)
+RUN echo 'import http.server, socketserver; print("Running on Python"); socketserver.TCPServer(("", 8080), http.server.SimpleHTTPRequestHandler).serve_forever()' > app.py
 
 EXPOSE 8080
 
-CMD ["./app"]
+CMD ["python", "app.py"]
