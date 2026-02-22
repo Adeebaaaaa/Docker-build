@@ -1,6 +1,10 @@
-FROM binblee/springboot-helm-chart:graalvm-22.3-java17
+# test-app/Dockerfile
 
-# Add a tiny change to force rebuild
-RUN apk add --no-cache curl
+FROM alpine:3.19
 
-EXPOSE 8080
+LABEL maintainer="ci-test"
+LABEL description="Simple test image for GitHub Actions multi-arch build"
+
+RUN echo "Building on $(uname -m)"
+
+CMD ["sh", "-c", "echo Hello from $(uname -m) && sleep 3600"]

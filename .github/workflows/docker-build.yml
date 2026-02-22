@@ -1,10 +1,7 @@
 name: Docker Multi-Platform Build
 
 on:
-  push:
-    branches:
-      - main
-  workflow_dispatch:  
+  workflow_dispatch: 
 
 env:
   PLATFORMS: linux/amd64,linux/arm64
@@ -95,7 +92,7 @@ jobs:
         uses: aws-actions/amazon-ecr-login@v2
 
       - name: Login to ACR / Generic
-        if: env.REGISTRY_TYPE != 'ecr'
+        if: ${{ env.REGISTRY_TYPE == 'acr' }}
         run: |
           echo "${{ secrets.ACR_PASSWORD }}" | docker login \
             --username "${{ secrets.ACR_USERNAME }}" \
