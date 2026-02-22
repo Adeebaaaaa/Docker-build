@@ -1,0 +1,122 @@
+name: Docker Multi-Platform Build
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:  
+
+env:
+  PLATFORMS: linux/amd64,linux/arm64
+  
+permissions:
+  contents: write
+
+jobs:
+  detect:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect changed Dockerfiles
+        id: set-matrix
+        run: |
+          echo "Detecting Dockerfile changes..."
+
+          if [ "${{ github.event.before }}" = "0000000000000000000000000000000000000000" ]; then
+            CHANGED=$(find . -name Dockerfile)
+          else
+            CHANGED=$(git diff --name-only \
+              ${{ github.event.before }} \
+              ${{ github.sha }} \
+              | grep Dockerfile || true)
+          fi
+
+          if [ -z "$CHANGED" ]; then
+            echo "No Dockerfiles changed"
+            echo 'matrix={"include":[]}' >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          JSON="{"include":["
+          FIRST=true
+
+          for file in $CHANGED; do
+            DIR=$(dirname "$file")
+            IMAGE_NAME=$(echo "$DIR" | sed 's|^\./||' | tr '/' '-')
+            [ "$IMAGE_NAME" = "." ] && IMAGE_NAME="root"
+
+            if [ "$FIRST" = true ]; then
+              FIRST=false
+            else
+              JSON="$JSON,"
+            fi
+
+            JSON="$JSON{\"context\":\"$DIR\",\"image\":\"$IMAGE_NAME\"}"
+          done
+
+          JSON="$JSON]}"
+          echo "matrix=$JSON" >> $GITHUB_OUTPUT
+
+  build:
+    needs: detect
+    environment: dev  
+
+    if: ${{ fromJson(needs.detect.outputs.matrix).include[0] != null }}
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix: ${{ fromJson(needs.detect.outputs.matrix) }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to AWS ECR
+        if: ${{ env.REGISTRY_TYPE == 'ecr' }}
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: ECR Login
+        if: ${{ env.REGISTRY_TYPE == 'ecr' }}
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Login to ACR / Generic
+        if: env.REGISTRY_TYPE != 'ecr'
+        run: |
+          echo "${{ secrets.ACR_PASSWORD }}" | docker login \
+            --username "${{ secrets.ACR_USERNAME }}" \
+            --password-stdin "${{ secrets.REGISTRY_URL }}"
+
+      - name: Ensure ECR Repository Exists
+        if: env.REGISTRY_TYPE == 'ecr'
+        run: |
+          aws ecr describe-repositories \
+            --repository-names "${{ matrix.image }}" \
+            --region "${{ secrets.AWS_REGION }}" \
+          || aws ecr create-repository \
+            --repository-name "${{ matrix.image }}" \
+            --region "${{ secrets.AWS_REGION }}"
+
+      - name: Build and Push
+        run: |
+          docker buildx build \
+            --platform "${{ env.PLATFORMS }}" \
+            --file "${{ matrix.context }}/Dockerfile" \
+            --tag "${{ secrets.REGISTRY_URL }}/${{ matrix.image }}:${{ github.sha }}" \
+            --tag "${{ secrets.REGISTRY_URL }}/${{ matrix.image }}:latest" \
+            --push \
+            "${{ matrix.context }}"
